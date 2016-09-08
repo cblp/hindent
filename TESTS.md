@@ -213,8 +213,9 @@ for xs $ \case
 Long arguments list
 
 ```haskell
-longLongFunction :: ReaderT r (WriterT w (StateT s m)) a
-                 -> StateT s (WriterT w (ReaderT r m)) a
+longLongFunction
+  :: ReaderT r (WriterT w (StateT s m)) a
+  -> StateT s (WriterT w (ReaderT r m)) a
 ```
 
 Long argument list should line break
@@ -473,9 +474,9 @@ bob -- after bob
   foo -- next to foo
   -- line after foo
     (bar
-       foo -- next to bar foo
-       bar -- next to bar
-     ) -- next to the end paren of (bar)
+      foo -- next to bar foo
+      bar -- next to bar
+    ) -- next to the end paren of (bar)
     -- line after (bar)
     mu -- next to mu
     -- line after mu
@@ -484,21 +485,21 @@ bob -- after bob
     -- line after zot
     (case casey -- after casey
            of
-       Just -- after Just
-        -> do
-         justice -- after justice
-          *
-           foo
-             (blah * blah + z + 2 / 4 + a - -- before a line break
-              2 * -- inside this mess
-              z /
-              2 /
-              2 /
-              aooooo /
-              aaaaa -- bob comment
-              ) +
-           (sdfsdfsd fsdfsdf) -- blah comment
-         putStrLn "")
+      Just -- after Just
+       -> do
+        justice -- after justice
+         *
+          foo
+            (blah * blah + z + 2 / 4 + a - -- before a line break
+             2 * -- inside this mess
+             z /
+             2 /
+             2 /
+             aooooo /
+             aaaaa -- bob comment
+             ) +
+          (sdfsdfsd fsdfsdf) -- blah comment
+        putStrLn "")
     [1, 2, 3]
     [ 1 -- foo
     , ( 2 -- bar

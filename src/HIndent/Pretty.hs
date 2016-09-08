@@ -108,28 +108,22 @@ lined ps = sequence_ (intersperse newline ps)
 -- | Print all the printers separated newlines and optionally a line
 -- prefix.
 prefixedLined :: String -> [Printer ()] -> Printer ()
-prefixedLined pref ps' =
-  case ps' of
-    [] -> return ()
-    (p:ps) ->
-      do p
-         indented (fromIntegral
-                     (length pref *
-                      (-1)))
-                  (mapM_ (\p' ->
-                            do newline
-                               depend (write pref) p')
-                         ps)
+prefixedLined _ [] = return ()
+prefixedLined pref (p:ps) = do
+  indented (fromIntegral $ length pref) p
+  for_ ps $ \p' -> do
+    newline
+    depend (write pref) p'
 
 -- | Set the (newline-) indent level to the given column for the given
 -- printer.
 column :: Int64 -> Printer a -> Printer a
-column i p = do
-  level <- gets psIndentLevel
-  modify (\s -> s {psIndentLevel = i})
-  m <- p
-  modify (\s -> s {psIndentLevel = level})
-  return m
+column i p =
+  do level <- gets psIndentLevel
+     modify (\s -> s {psIndentLevel = i})
+     m <- p
+     modify (\s -> s {psIndentLevel = level})
+     return m
 
 -- | Output a newline.
 newline :: Printer ()
@@ -168,11 +162,33 @@ depend maker dependent =
 
 -- | Wrap.
 wrap :: String -> String -> Printer a -> Printer a
-wrap open close p = depend (write open) $ p <* write close
+wrap open close p = write open *> p <* write close
+
+-- | Wrap with dependency on opening bracket.
+wrapDep :: String -> String -> Printer a -> Printer a
+wrapDep open close p = depend (write open) $ p <* write close
 
 -- | Wrap in parens.
 parens :: Printer a -> Printer a
 parens = wrap "(" ")"
+
+-- | Wrap in parens with dependency on opening one.
+parensDep :: Printer a -> Printer a
+parensDep = wrapDep "(" ")"
+
+-- | Wrap in unboxed tuple parens @(# ... #)@.
+unboxParens :: Printer a -> Printer a
+unboxParens = wrap "(# " " #)"
+
+-- | Wrap in boxed or unboxed tuple parens.
+parens' :: Boxed -> Printer a -> Printer a
+parens' Unboxed = unboxParens
+parens' Boxed   = parens
+
+-- | Parens for vertical alignment
+parensVer' :: Boxed -> Printer a -> Printer a
+parensVer' Unboxed = unboxParens
+parensVer' Boxed   = wrap "( " ")"
 
 -- | Wrap in braces.
 braces :: Printer a -> Printer a
@@ -282,11 +298,8 @@ swingBy i a b =
 -- * Instances
 
 instance Pretty Context where
-  prettyInternal ctx@(CxTuple _ asserts) = do
-    mst <- fitsOnOneLine (parens (commas (map pretty asserts)))
-    case mst of
-      Nothing -> context ctx
-      Just st -> put st
+  prettyInternal ctx@(CxTuple _ asserts) =
+    parens (commas (map pretty asserts)) `ifFitsOnOneLineOrElse` context ctx
   prettyInternal ctx = context ctx
 
 instance Pretty Pat where
@@ -323,25 +336,24 @@ instance Pretty Pat where
                    write (case boxed of
                             Unboxed -> "#)"
                             Boxed -> ")"))
-      PList _ ps ->
-        brackets (commas (map pretty ps))
+      PList _ ps -> brackets . commas $ map pretty ps
       PParen _ e -> parens (pretty e)
       PRec _ qname fields -> do
-        let horVariant = do
+        let hor = do
               pretty qname
               space
               braces $ commas $ map pretty fields
-            verVariant =
+            ver =
               depend (pretty qname >> space) $
                 case fields of
                   [] -> write "{}"
                   [field] -> braces $ pretty field
                   _ -> do
-                    depend (write "{") $
-                      prefixedLined "," $ map (depend space . pretty) fields
+                    write "{ "
+                    prefixedLined ", " $ map pretty fields
                     newline
                     write "}"
-        horVariant `ifFitsOnOneLineOrElse` verVariant
+        hor `ifFitsOnOneLineOrElse` ver
       PAsPat _ n p ->
         depend (do pretty n
                    write "@")
@@ -413,28 +425,16 @@ exp (Lambda _ pats (Do l stmts)) =
                          (lined (map pretty stmts))
        Just st -> put st
 -- | Space out tuples.
-exp (Tuple _ boxed exps) = do
-  let horVariant = parensB boxed $ inter (write ", ") (map pretty exps)
-      verVariant = parensB boxed $ prefixedLined "," (map (depend space . pretty) exps)
-  mst <- fitsOnOneLine horVariant
-  case mst of
-    Nothing -> verVariant
-    Just st -> put st
+exp (Tuple _ boxed exps) = hor `ifFitsOnOneLineOrElse` ver
   where
-    parensB Unboxed = wrap "(#" "#)"
-    parensB Boxed   = parens
+    hor = parens' boxed . commas $ map pretty exps
+    ver = parensVer' boxed . prefixedLined ", " $ map pretty exps
 -- | Space out tuples.
-exp (TupleSection _ boxed mexps) = do
-  let horVariant = parensB boxed $ inter (write ", ") (map (maybe (return ()) pretty) mexps)
-      verVariant =
-        parensB boxed $ prefixedLined "," (map (maybe (return ()) (depend space . pretty)) mexps)
-  mst <- fitsOnOneLine horVariant
-  case mst of
-    Nothing -> verVariant
-    Just st -> put st
+exp (TupleSection _ boxed mexps) = hor `ifFitsOnOneLineOrElse` ver
   where
-    parensB Unboxed = wrap "(#" "#)"
-    parensB Boxed   = parens
+    hor = parens' boxed . commas $ map (maybe (return ()) pretty) mexps
+    ver = parens' boxed . prefixedLined "," $
+      map (maybe (return ()) $ depend space . pretty) mexps
 -- | Infix apps, same algorithm as ChrisDone at the moment.
 exp e@(InfixApp _ a op b) =
   infixApp e a op b Nothing
@@ -482,18 +482,14 @@ exp (App _ op arg) = do
       }
 -- | Space out commas in list.
 exp (List _ es) =
-  do mst <- fitsOnOneLine p
-     case mst of
-       Nothing -> do
-         depend
-           (write "[")
-           (prefixedLined "," (map (depend space . pretty) es))
-         newline
-         write "]"
-       Just st -> put st
-  where p =
-          brackets (inter (write ", ")
-                          (map pretty es))
+  hor `ifFitsOnOneLineOrElse` ver
+  where
+    hor = brackets . commas $ map pretty es
+    ver = do
+      write "[ "
+      prefixedLined ", " $ map pretty es
+      newline
+      write "]"
 exp (RecUpdate _ exp' updates) = recUpdateExpr (pretty exp') updates
 exp (RecConstr _ qname updates) = recUpdateExpr (pretty qname) updates
 exp (Let _ binds e) =
@@ -503,33 +499,35 @@ exp (Let _ binds e) =
              indented (-4) (depend (write "in ")
                                    (pretty e)))
 exp (ListComp _ e qstmt) = do
-  let horVariant = brackets $ do
+  let hor = brackets $ do
         pretty e
         write " | "
         commas $ map pretty qstmt
-      verVariant = do
+      ver = do
         write "[ "
         pretty e
         newline
-        depend (write "| ") $ prefixedLined ", " $ map pretty qstmt
+        write "| "
+        prefixedLined ", " $ map pretty qstmt
         newline
         write "]"
-  horVariant `ifFitsOnOneLineOrElse` verVariant
+  hor `ifFitsOnOneLineOrElse` ver
 
 exp (ParComp _ e qstmts) = do
-  let horVariant = brackets $ do
+  let hor = brackets $ do
         pretty e
         for_ qstmts $ \qstmt -> do
           write " | "
           commas $ map pretty qstmt
-      verVariant = do
+      ver = do
         depend (write "[ ") $ pretty e
         newline
         for_ qstmts $ \qstmt -> do
-          depend (write "| ") $ prefixedLined ", " $ map pretty qstmt
+          write "| "
+          prefixedLined ", " $ map pretty qstmt
           newline
         write "]"
-  horVariant `ifFitsOnOneLineOrElse` verVariant
+  hor `ifFitsOnOneLineOrElse` ver
 
 exp TypeApp {} = error "FIXME: No implementation for TypeApp"
 exp ExprHole {} = write "_"
@@ -546,7 +544,7 @@ exp (Lambda _ ps e) = do
          | (i, x) <- zip [0 :: Int ..] ps
          ]
   swing (write " ->") $ pretty e
-exp (Paren _ e) = parens (pretty e)
+exp (Paren _ e) = parensDep $ pretty e
 exp (Case _ e alts) =
   do depend (write "case ")
             (do pretty e
@@ -701,8 +699,7 @@ decl (InstDecl _ moverlap dhead decls) =
                 indentedBlock (lined (map pretty (fromMaybe [] decls))))
 decl (SpliceDecl _ e) = pretty e
 decl (TypeSig _ names ty) =
-  depend (do inter (write ", ")
-                   (map pretty names)
+  depend (do commas $ map pretty names
              write " :: ")
          (pretty ty)
 decl (FunBind _ matches) =
@@ -743,23 +740,21 @@ decl (DataDecl _ dataornew ctx dhead condecls mderivs) =
        Just derivs ->
          do newline
             column indentSpaces (pretty derivs)
-  where singleCons x =
-          do write " ="
-             indentSpaces <- getIndentSpaces
-             column indentSpaces
-                    (do newline
-                        pretty x)
-        multiCons xs =
-          do newline
-             indentSpaces <- getIndentSpaces
-             column indentSpaces
-                    (depend (write "=")
-                            (prefixedLined "|"
-                                           (map (depend space . pretty) xs)))
+  where singleCons x = do
+          write " ="
+          indentSpaces <- getIndentSpaces
+          column indentSpaces $ do
+            newline
+            pretty x
+        multiCons xs = do
+          newline
+          indentSpaces <- getIndentSpaces
+          column indentSpaces $ do
+            write "= "
+            prefixedLined "| " $ map pretty xs
 
 decl (InlineSig _ inline active name) = do
   write "{-# "
-
   unless inline $ write "NO"
   write "INLINE "
   case active of
@@ -1179,8 +1174,7 @@ instance Pretty ImportDecl where
   prettyInternal = pretty'
 
 instance Pretty ModuleName where
-  prettyInternal (ModuleName _ name) =
-    write name
+  prettyInternal (ModuleName _ name) = write name
 
 instance Pretty ImportSpecList where
   prettyInternal = pretty'
@@ -1194,15 +1188,13 @@ instance Pretty WarningText where
 
 instance Pretty ExportSpecList where
   prettyInternal (ExportSpecList _ es) = do
-    depend (write "(")
-           (prefixedLined "," (map pretty es))
+    write "( "
+    prefixedLined ", " $ map pretty es
     newline
     write ")"
 
 instance Pretty ExportSpec where
-  prettyInternal x = do
-    space
-    pretty' x
+  prettyInternal = pretty'
 
 -- Do statements need to handle infix expression indentation specially because
 -- do x *
@@ -1299,7 +1291,7 @@ guardedRhs (GuardedRhs _ stmts e) = do
       printStmts
       swingIt
   where
-    printStmts = indented 2 . prefixedLined ", " $ map pretty stmts
+    printStmts = prefixedLined ", " $ map pretty stmts
     hor = do
       space
       rhsSeparator
@@ -1332,17 +1324,11 @@ context ctx =
   case ctx of
     CxSingle _ a -> pretty a
     CxTuple _ as -> do
-      depend (write "( ") $ prefixedLined ", " (map pretty as)
+      write "( "
+      prefixedLined ", " $ map pretty as
       newline
       write ")"
     CxEmpty _ -> parens (return ())
-
-unboxParens :: Printer a -> Printer a
-unboxParens p =
-  depend (write "(# ")
-         (do v <- p
-             write " #)"
-             return v)
 
 typ :: Type NodeInfo -> Printer ()
 typ (TyTuple _ Boxed types) = parens $ inter (write ", ") $ map pretty types
@@ -1415,21 +1401,14 @@ decl' :: Decl NodeInfo -> Printer ()
 --     -> (Char -> X -> Y)
 --     -> IO ()
 --
-decl' (TypeSig _ names ty') =
-  do mst <- fitsOnOneLine (declTy ty')
-     case mst of
-       Just{} -> depend (do inter (write ", ")
-                                  (map pretty names)
-                            write " :: ")
-                          (declTy ty')
-       Nothing -> do inter (write ", ")
-                           (map pretty names)
-                     newline
-                     indentSpaces <- getIndentSpaces
-                     indented indentSpaces
-                              (depend (write ":: ")
-                                      (declTy ty'))
-
+decl' (TypeSig _ names ty') = do
+  commas $ map pretty names
+  let hor = do
+        write " :: "
+        declTy ty'
+  ifFitsOnOneLineOrElse hor . swing (pure ()) $ do
+    write ":: "
+    declTy ty'
   where declTy dty =
           case dty of
             TyForall _ mbinds mctx ty ->
@@ -1445,9 +1424,7 @@ decl' (TypeSig _ names ty') =
                    Just ctx ->
                      do pretty ctx
                         newline
-                        indented (-3)
-                                 (depend (write "=> ")
-                                         (prettyTy ty))
+                        depend (write "=> ") $ prettyTy ty
             _ -> prettyTy dty
         collapseFaps (TyFun _ arg result) = arg : collapseFaps result
         collapseFaps e = [e]
@@ -1499,26 +1476,16 @@ qualConDecl x =
 -- | Fields are preceded with a space.
 conDecl :: ConDecl NodeInfo -> Printer ()
 conDecl (RecDecl _ name fields) =
-  depend (do pretty name
-             write " ")
-         (do depend (write "{")
-                    (prefixedLined ", "
-                                   (map (depend space . pretty) fields))
-             write "}")
-conDecl x = case x of
-              ConDecl _ name bangty ->
-                depend (do pretty name
-                           unless (null bangty) space)
-                       (lined (map pretty bangty))
-              InfixConDecl l a f b ->
-                pretty (ConDecl l f [a,b])
-              RecDecl _ name fields ->
-                depend (do pretty name
-                           space)
-                       (do depend (write "{")
-                                  (prefixedLined ", "
-                                                 (map pretty fields))
-                           write "}")
+  depend (pretty name >> space) $ do
+    write "{ "
+    prefixedLined ", " $ map pretty fields
+    newline
+    write "}"
+conDecl (ConDecl _ name bangty) =
+  depend (pretty name >> unless (null bangty) space) $
+    lined (map pretty bangty)
+conDecl (InfixConDecl l a f b) =
+  pretty (ConDecl l f [a,b])
 
 -- | Record decls are formatted like: Foo
 -- { bar :: X
@@ -1528,12 +1495,11 @@ recDecl (RecDecl _ name fields) =
   do pretty name
      indentSpaces <- getIndentSpaces
      newline
-     column indentSpaces
-            (do depend (write "{")
-                       (prefixedLined ","
-                                      (map (depend space . pretty) fields))
-                newline
-                write "}")
+     column indentSpaces $ do
+       write "{ "
+       prefixedLined ", " $ map pretty fields
+       newline
+       write "}"
 recDecl r = prettyInternal r
 
 recUpdateExpr :: Printer () -> [FieldUpdate NodeInfo] -> Printer ()
@@ -1549,7 +1515,8 @@ recUpdateExpr expWriter updates =
       updatesHor
     updatesHor = braces $ commas $ map pretty updates
     updatesVer = do
-      depend (write "{ ") $ prefixedLined ", " $ map pretty updates
+      write "{ "
+      prefixedLined ", " $ map pretty updates
       newline
       write "}"
 
