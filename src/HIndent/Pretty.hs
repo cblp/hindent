@@ -1170,9 +1170,10 @@ formatImports =
               else imps
       sequence_ . intersperse newline $ map formatImport imps1
       where
-        moduleVisibleName idecl =
-          let ModuleName _ name = importModule idecl
-          in name
+        moduleVisibleName ImportDecl { importModule = ModuleName _ name
+                                     , importPkg
+                                     , importQualified
+                                     } = (importPkg, name, importQualified)
     formatImport = pretty
 
 groupAdjacentBy :: (a -> a -> Bool) -> [a] -> [[a]]
