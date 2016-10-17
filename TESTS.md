@@ -636,6 +636,7 @@ bob -- after bob
     ]
     -- in the end of the function
   where
+    -- before alpha
     alpha = alpha
     -- between alpha and beta
     beta = beta
@@ -660,9 +661,6 @@ Doesn't work yet (wrong comment position detection)
 gamma = do
   -- in the beginning of a do-block
   delta
-  where
-    -- before alpha
-    alpha = alpha
 ```
 
 Haddock comments
@@ -693,7 +691,7 @@ data X = X
   }
 ```
 
-Comments around regular declarations
+Comments_around regular declarations
 
 ``` haskell
 -- This is some random comment.
@@ -708,7 +706,7 @@ Multi-line comments
 bob {- after bob -}
  =
   foo {- next to foo -}
-  {- line after foo -}
+    {- line after foo -}
     (bar
        foo {- next to bar foo -}
        bar {- next to bar -}
