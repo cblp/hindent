@@ -33,15 +33,17 @@ library
                      HIndent.Types
                      HIndent.Pretty
   build-depends:     base >= 4.7 && <5
+                   , bytestring
                    , containers
-                   , haskell-src-exts >= 1.18
+                   , exceptions
+                   , ghc
+                   , ghc-exactprint
                    , monad-loops
                    , mtl
-                   , bytestring
-                   , utf8-string
-                   , transformers
-                   , exceptions
+                   , template-haskell
                    , text
+                   , transformers
+                   , utf8-string
                    , yaml
 
 executable hindent
