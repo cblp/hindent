@@ -344,6 +344,29 @@ longLongFunction
   -> StateT s (WriterT w (ReaderT r m)) a
 ```
 
+Long complex type
+
+```haskell
+-- with type operator somewhere inside
+initializeResource
+  :: Def ('[ Ref s Context
+           , Ref 'Global Instance
+           , Ref 'Global Resource
+           , Parameter
+           , Argument
+           ] :->
+          IBool)
+-- with promoted type operator somewhere inside
+initializeResource
+  :: Def ('[ Ref s Context
+           , Ref 'Global Instance
+           , Ref 'Global Resource
+           , Parameter
+           , Argument
+           ] ':->
+          IBool)
+```
+
 Class constraints should leave :: on same line
 
 ``` haskell pending

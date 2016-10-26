@@ -1619,12 +1619,16 @@ typ x = case x of
                          write ":")
           TyApp _ f a ->
             case f of
-              TyApp _ g op@(TyPromoted _ (PromotedCon _ _ (UnQual _ (Symbol _ _)))) -> do
+              TyApp _ g op@(TyPromoted _ (PromotedCon _ _ (UnQual _ (Symbol _ _)))) ->
                 -- workaround for HSE parsing bug
-                pretty g
-                space
-                prettyInfixTypeOp op
-                ifFitsOnOneLineThenSpaceElseNewline $ pretty a
+                let hor = spaced [pretty g, prettyInfixTypeOp op, pretty a]
+                    ver = do
+                      pretty g
+                      space
+                      prettyInfixTypeOp op
+                      newline
+                      pretty a
+                in hor `ifFitsOnOneLineOrElse` ver
               _ -> do
                 pretty f
                 space
@@ -1632,11 +1636,15 @@ typ x = case x of
           TyVar _ n -> pretty n
           TyCon _ p -> pretty p
           TyParen _ e -> parens (pretty e)
-          TyInfix _ a op b -> do
-            pretty a
-            space
-            prettyInfixOp op
-            ifFitsOnOneLineThenSpaceElseNewline $ pretty b
+          TyInfix _ a op b ->
+            let hor = spaced [pretty a, prettyInfixOp op, pretty b]
+                ver = do
+                  pretty a
+                  space
+                  prettyInfixOp op
+                  newline
+                  pretty b
+            in hor `ifFitsOnOneLineOrElse` ver
           TyKind _ ty k ->
             parens (do pretty ty
                        write " :: "
